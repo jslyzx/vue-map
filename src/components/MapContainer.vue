@@ -36,12 +36,7 @@
         </div>
 
         <div class="map-wrapper">
-            <div class="map-controls">
-                <div class="toggle-group">
-                    <button :class="{ active: !isAggregation }" @click="isAggregation = false">列表</button>
-                    <button :class="{ active: isAggregation }" @click="isAggregation = true">定位</button>
-                </div>
-            </div>
+            <!-- Removed toggle-group as requested -->
             <div id="map-container"></div>
         </div>
     </div>
@@ -55,7 +50,7 @@ import { generateMockData } from '../utils/mockData';
 // State
 const map = shallowRef(null);
 const tasks = ref([]);
-const isAggregation = ref(false);
+// Removed isAggregation ref
 const currentTask = ref(null);
 
 // Objects refs
@@ -161,13 +156,7 @@ const showInfoWindow = (position, data) => {
     infoWindow.open(map.value, position);
 };
 
-const createLabelMarker = (position, text, type) => {
-    const marker = new AMap.Marker({
-        position: position,
-        animation: 'AMAP_ANIMATION_DROP',
-    });
-    return marker;
-};
+
 
 // Custom Cluster Render Function
 // Custom Cluster Render Function
@@ -239,75 +228,63 @@ const updateMap = () => {
         const startPt = task.start.position;
         const endPt = task.end.position;
 
-        if (isAggregation.value) {
-            allClusterPoints.push({
-                lnglat: startPt,
-                ...task,
-                pointType: 'Start'
-            });
-            allClusterPoints.push({
-                lnglat: endPt,
-                ...task,
-                pointType: 'End'
-            });
+        // Unified: Always push to cluster
+        allClusterPoints.push({
+            lnglat: startPt,
+            ...task,
+            pointType: 'Start'
+        });
+        allClusterPoints.push({
+            lnglat: endPt,
+            ...task,
+            pointType: 'End'
+        });
 
-        } else {
-            const m1 = createLabelMarker(startPt, task.district, 'Start');
-            m1.on('click', () => showInfoWindow(startPt, task));
+        // Add Dashed Line and Distance (Always shown now)
+        const polyline = new AMap.Polyline({
+            path: [startPt, endPt],
+            isOutline: false,
+            borderWeight: 1,
+            strokeColor: "#333",
+            strokeOpacity: 0.8,
+            strokeWeight: 2,
+            strokeStyle: "dashed",
+            strokeDasharray: [10, 5],
+            lineJoin: 'round',
+            zIndex: 50,
+        });
+        lines.push(polyline);
 
-            const m2 = createLabelMarker(endPt, task.district, 'End');
-            m2.on('click', () => showInfoWindow(endPt, task));
+        const midLng = (startPt[0] + endPt[0]) / 2;
+        const midLat = (startPt[1] + endPt[1]) / 2;
 
-            markers.push(m1, m2);
-
-            const polyline = new AMap.Polyline({
-                path: [startPt, endPt],
-                isOutline: false,
-                borderWeight: 1,
-                strokeColor: "#333",
-                strokeOpacity: 0.8,
-                strokeWeight: 2,
-                strokeStyle: "dashed",
-                strokeDasharray: [10, 5],
-                lineJoin: 'round',
-                zIndex: 50,
-            });
-            lines.push(polyline);
-
-            const midLng = (startPt[0] + endPt[0]) / 2;
-            const midLat = (startPt[1] + endPt[1]) / 2;
-
-            const text = new AMap.Text({
-                text: `${task.distance} <br> km`,
-                anchor: 'center',
-                style: {
-                    'padding': '4px 8px',
-                    'border-radius': '4px',
-                    'background-color': 'white',
-                    'border': '1px solid #ddd',
-                    'text-align': 'center',
-                    'font-size': '12px',
-                    'color': '#333',
-                    'box-shadow': '0 2px 4px rgba(0,0,0,0.1)'
-                },
-                position: [midLng, midLat],
-                zIndex: 100
-            });
-            textMarkers.push(text);
-        }
+        const text = new AMap.Text({
+            text: `${task.distance} <br> km`,
+            anchor: 'center',
+            style: {
+                'padding': '4px 8px',
+                'border-radius': '4px',
+                'background-color': 'white',
+                'border': '1px solid #ddd',
+                'text-align': 'center',
+                'font-size': '12px',
+                'color': '#333',
+                'box-shadow': '0 2px 4px rgba(0,0,0,0.1)'
+            },
+            position: [midLng, midLat],
+            zIndex: 100
+        });
+        textMarkers.push(text);
     });
+    map.value.add(lines);
+    map.value.add(textMarkers);
 
-    if (isAggregation.value && allClusterPoints.length > 0) {
+    if (allClusterPoints.length > 0) {
         cluster = new AMap.MarkerCluster(map.value, allClusterPoints, {
             gridSize: 60,
             renderClusterMarker: _renderClusterMarker,
             renderMarker: _renderMarker
         });
-    } else {
-        map.value.add(markers);
-        map.value.add(lines);
-        map.value.add(textMarkers);
-        map.value.setFitView();
     }
 };
 
@@ -318,7 +295,7 @@ const focusTask = (task) => {
     showInfoWindow(task.start.position, task);
 };
 
-watch(isAggregation, updateMap);
+
 
 onMounted(() => {
     initMap();
@@ -437,33 +414,7 @@ onUnmounted(() => {
     position: relative;
 }
 
-.map-controls {
-    position: absolute;
-    top: 20px;
-    right: 20px;
-    z-index: 100;
-}
 
-.toggle-group {
-    background: white;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-    border-radius: 4px;
-    overflow: hidden;
-    display: flex;
-}
-
-.toggle-group button {
-    border: none;
-    padding: 8px 16px;
-    background: white;
-    cursor: pointer;
-    font-size: 14px;
-}
-
-.toggle-group button.active {
-    background: #1890ff;
-    color: white;
-}
 
 #map-container {
     width: 100%;
