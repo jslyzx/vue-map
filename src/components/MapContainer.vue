@@ -3,9 +3,18 @@
         <div class="sidebar">
             <!-- Filter Header -->
             <div class="filter-row">
-                <input placeholder="省(可输入搜索)" class="input-filter" />
-                <input placeholder="市(可输入搜索)" class="input-filter" />
-                <input placeholder="区/县(可输入搜索)" class="input-filter" />
+                <select v-model="selectedProvince" class="select-filter" @change="onProvinceChange">
+                    <option value="">全部省份</option>
+                    <option v-for="(name, code) in provinceList" :key="code" :value="code">{{ name }}</option>
+                </select>
+                <select v-model="selectedCity" class="select-filter" @change="onCityChange">
+                    <option value="">全部城市</option>
+                    <option v-for="(name, code) in cityList" :key="code" :value="code">{{ name }}</option>
+                </select>
+                <select v-model="selectedDistrict" class="select-filter">
+                    <option value="">全部区县</option>
+                    <option v-for="(name, code) in districtList" :key="code" :value="code">{{ name }}</option>
+                </select>
             </div>
 
             <!-- Search Row -->
@@ -46,12 +55,88 @@
 import { onMounted, onUnmounted, ref, computed, shallowRef, watch } from 'vue';
 import AMapLoader from '@amap/amap-jsapi-loader';
 import { generateMockData } from '../utils/mockData';
+import { areaList } from '@vant/area-data';
 
 // State
 const map = shallowRef(null);
 const tasks = ref([]);
-// Removed isAggregation ref
 const currentTask = ref(null);
+
+// 省市区选择
+const selectedProvince = ref('');
+const selectedCity = ref('');
+const selectedDistrict = ref('');
+
+// 省份列表
+const provinceList = computed(() => areaList.province_list);
+
+// 城市列表（根据选中的省份筛选）
+const cityList = computed(() => {
+    if (!selectedProvince.value) return {};
+    const provinceCode = selectedProvince.value.substring(0, 2);
+    const cities = {};
+    for (const [code, name] of Object.entries(areaList.city_list)) {
+        if (code.startsWith(provinceCode)) {
+            cities[code] = name;
+        }
+    }
+    return cities;
+});
+
+// 区县列表（根据选中的城市筛选）
+const districtList = computed(() => {
+    if (!selectedCity.value) return {};
+    const cityCode = selectedCity.value.substring(0, 4);
+    const districts = {};
+    for (const [code, name] of Object.entries(areaList.county_list)) {
+        if (code.startsWith(cityCode)) {
+            districts[code] = name;
+        }
+    }
+    return districts;
+});
+
+// 省份改变时清空市和区
+const onProvinceChange = () => {
+    selectedCity.value = '';
+    selectedDistrict.value = '';
+};
+
+// 城市改变时清空区
+const onCityChange = () => {
+    selectedDistrict.value = '';
+};
+
+// 原始数据
+let allTasks = [];
+
+// 根据省市区选择过滤数据
+const filterTasks = () => {
+    let filtered = [...allTasks];
+
+    // 获取选中的名称
+    const provinceName = selectedProvince.value ? areaList.province_list[selectedProvince.value] : '';
+    const cityName = selectedCity.value ? areaList.city_list[selectedCity.value] : '';
+    const districtName = selectedDistrict.value ? areaList.county_list[selectedDistrict.value] : '';
+
+    if (provinceName) {
+        filtered = filtered.filter(task => task.province === provinceName);
+    }
+    if (cityName) {
+        filtered = filtered.filter(task => task.city === cityName);
+    }
+    if (districtName) {
+        filtered = filtered.filter(task => task.district === districtName);
+    }
+
+    tasks.value = filtered;
+    updateMap();
+};
+
+// 监听省市区选择变化
+watch([selectedProvince, selectedCity, selectedDistrict], () => {
+    filterTasks();
+});
 
 // Objects refs
 let cluster = null;
@@ -94,7 +179,9 @@ const initMap = async () => {
             closeWhenClickMap: true
         });
 
-        tasks.value = generateMockData(40); // Increase count to show clustering better
+        // 生成并保存原始数据
+        allTasks = generateMockData(40);
+        tasks.value = allTasks;
         updateMap();
 
     } catch (e) {
@@ -125,12 +212,23 @@ const clearMapOverlays = () => {
 const showInfoWindow = (position, data) => {
     if (!map.value || !infoWindow) return;
 
+    // 处理 position 可能是 LngLat 对象或数组的情况
+    let positionArray;
+    if (Array.isArray(position)) {
+        positionArray = position;
+    } else if (position && typeof position.getLng === 'function') {
+        // AMap.LngLat 对象
+        positionArray = [position.getLng(), position.getLat()];
+    } else {
+        positionArray = [0, 0];
+    }
+
     const content = `
         <div class="info-window-content" style="padding:10px; font-size:14px; min-width:250px;">
            <div style="font-weight:bold; margin-bottom:8px;">${data.name}</div>
            <div style="font-size:12px; color:#666; margin-bottom:4px;">
                 WGS84: ${data.coordsStr} <br>
-                GCJ-02: ${position.join(', ')}
+                GCJ-02: ${positionArray.join(', ')}
            </div>
            <div style="margin-bottom:8px;">
              <button style="margin-right:8px; padding:2px 8px;">高德导航</button>
@@ -153,7 +251,7 @@ const showInfoWindow = (position, data) => {
     `;
 
     infoWindow.setContent(content);
-    infoWindow.open(map.value, position);
+    infoWindow.open(map.value, positionArray);
 };
 
 
@@ -197,20 +295,20 @@ const _renderClusterMarker = (context) => {
 
 const _renderMarker = (context) => {
     // Normal marker inside cluster (when zoomed in to show single but still handled by cluster plugin)
-    // Or we can just let it be default.
-    // But typically we do not want to customize this unless necessary.
-    // If we want to use our createLabelMarker style, we might need to return content string.
-
     // For now, simple blue style to match Image 1
-    const content = `<div style="width: 20px; height: 30px; background-image: url(https://a.amap.com/jsapi_demos/static/demo-center/icons/poi-marker-default.png); background-size: contain; background-repeat: no-repeat;"></div>`;
+    const content = `<div style="width: 20px; height: 30px; background-image: url(https://a.amap.com/jsapi_demos/static/demo-center/icons/poi-marker-default.png); background-size: contain; background-repeat: no-repeat; cursor: pointer;"></div>`;
     context.marker.setContent(content);
     context.marker.setOffset(new AMap.Pixel(-10, -30));
 
-    // Bind click
-    const data = context.data[0]; // data is array
+    // Get data from context - data is an array of points at this location
+    const data = context.data && context.data[0];
     if (data) {
-        context.marker.on('click', () => {
-            showInfoWindow(data.lnglat, data);
+        // Remove previous click listeners to avoid duplicate bindings
+        context.marker.clearEvents('click');
+        // Bind click event to show info window
+        context.marker.on('click', (e) => {
+            const position = data.lnglat || [e.lnglat.getLng(), e.lnglat.getLat()];
+            showInfoWindow(position, data);
         });
     }
 };
@@ -330,12 +428,24 @@ onUnmounted(() => {
     border-bottom: 1px solid #f0f0f0;
 }
 
-.input-filter {
+.select-filter {
     flex: 1;
     padding: 6px;
     border: 1px solid #ddd;
     border-radius: 4px;
     font-size: 12px;
+    background: white;
+    cursor: pointer;
+    min-width: 0;
+}
+
+.select-filter:focus {
+    outline: none;
+    border-color: #409eff;
+}
+
+.select-filter:hover {
+    border-color: #c0c4cc;
 }
 
 .search-row {
